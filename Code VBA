@@ -1,0 +1,1135 @@
+' ========================================
+' FUNGSI: GENERATE INCLUDED LIST
+' ========================================
+Function GenerateIncludedList() As Variant
+    Dim result() As String
+    Dim counter As Long
+    Dim i As Long, j As Long
+    
+    ' Total: 26 huruf + 99 angka + 676 kombinasi = 801 elemen
+    ReDim result(0 To 800)
+    counter = 0
+    
+    ' 1. Tambahkan huruf A-Z
+    For i = 65 To 90 ' ASCII A-Z
+        result(counter) = Chr(i)
+        counter = counter + 1
+    Next i
+    
+    ' 2. Tambahkan angka 01-99
+    For i = 1 To 99
+        result(counter) = Format(i, "00")
+        counter = counter + 1
+    Next i
+    
+    ' 3. Tambahkan kombinasi AA-ZZ
+    For i = 65 To 90 ' Huruf pertama A-Z
+        For j = 65 To 90 ' Huruf kedua A-Z
+            result(counter) = Chr(i) & Chr(j)
+            counter = counter + 1
+        Next j
+    Next i
+    
+    GenerateIncludedList = result
+End Function
+
+Private Sub Worksheet_Activate()
+    Me.Columns("B:E").NumberFormat = "@"
+End Sub
+
+Private Sub Worksheet_Change(ByVal Target As Range)
+    ' ========================================
+    ' SOLUSI ANTI-FREEZE: FILTER DI AWAL
+    ' ========================================
+    
+    ' 1. Batasi area kerja aktif (hanya B10:U1000)
+    If Intersect(Target, Me.Range("B7:U10000")) Is Nothing Then
+        Exit Sub
+    End If
+    
+    ' 2. Skip jika hapus banyak baris/kolom sekaligus (ANTI NOT RESPONDING)
+    If Target.Rows.Count > 50 Or Target.Columns.Count > 5 Then
+        Application.StatusBar = "?? Perubahan terlalu besar - proses otomatis di-skip untuk menghindari freeze"
+        Exit Sub
+    End If
+    
+    ' 3. Skip jika Target adalah entire row/column
+    If Target.Address = Target.EntireRow.Address Or Target.Address = Target.EntireColumn.Address Then
+        Exit Sub
+    End If
+    
+    ' ========================================
+    ' DISABLE EVENTS & OPTIMIZATION
+    ' ========================================
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.StatusBar = "? Memproses perubahan..."
+
+    On Error GoTo Cleanup
+
+    Dim lookupRange As Range
+    Dim hasil As Variant
+    Dim mergeRange As Range
+    Dim mergeRange1 As Range
+    Dim cell As Range
+    Dim wsDB As Worksheet
+    Dim lastRow As Long
+    Dim checkRange As Range
+    Dim excluded_list As Variant
+    Dim rowNum As Long
+    Dim isExcluded As Boolean
+    Dim isIn As Boolean
+    Dim included_list As Variant
+    Dim included_list_2 As Variant
+    Dim i As Long
+    
+    ' ========================================
+    ' AUTO BORDER UNTUK CELL YANG DIUBAH
+    ' ========================================
+    Call EnsureRowBorders(Target)
+    
+    ' ========================================
+    ' DAFTAR NILAI YANG DIKECUALIKAN
+    ' ========================================
+    excluded_list = Array( _
+                    "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", _
+                    "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", _
+                    "A", "AB", "B", "BC", "C", "CD", _
+                    "D", "DE", "E", "EF", "F", "FG", _
+                    "G", "GH", "H", "HI", "I", "IJ", _
+                    "J", "JK", "K", "KL", "L", "LM", _
+                    "M", "MN", "N", "NO", "O", "OP", _
+                    "P", "PQ", "Q", "QR", "R", "RS", _
+                    "S", "ST", "T", "TU", "U", "UV", _
+                    "V", "VW", "W", "WX", "X", "XY", _
+                    "Y", "YZ", "Z")
+    
+    included_list_2 = Array("A", "B", "C", "D", "E", "F", "G", _
+                      "H", "I", "J", "K", "L", "M", "N", _
+                      "O", "P", "Q", "R", "S", "T", "U", _
+                      "V", "W", "X", "Y", "Z")
+    
+    ' ========================================
+    ' GENERATE INCLUDED LIST (A-Z, 01-99, AA-ZZ)
+    ' ========================================
+    included_list = GenerateIncludedList()
+
+    ' ========================================
+    ' BLOK 1: VLOOKUP OTOMATIS - KOLOM B
+    ' ========================================
+    Dim intersectB As Range
+    Set intersectB = Intersect(Target, Me.Range("B7:B10000"))
+    
+    If Not intersectB Is Nothing Then
+        If intersectB.Rows.Count <= 50 Then ' Batasi max 50 baris
+            For Each cell In intersectB.Cells
+                ' ========== CEK: Apakah value termasuk excluded_list? ==========
+                isExcluded = False
+                If Not IsEmpty(cell.Value) Then
+                    For i = LBound(included_list_2) To UBound(included_list_2)
+                        If UCase(Trim(cell.Value)) = UCase(Trim(CStr(included_list_2(i)))) Then
+                            isExcluded = True
+                            Exit For
+                        End If
+                    Next i
+                End If
+                
+                If isExcluded Then
+                    ' ====== JIKA TERMASUK EXCLUDED LIST ======
+                    Set mergeRange1 = Me.Range("C" & cell.Row & ":F" & cell.Row)
+                    If mergeRange1.MergeCells Then mergeRange1.UnMerge
+                    mergeRange1.Merge
+                    mergeRange1.HorizontalAlignment = xlLeft
+                    mergeRange1.VerticalAlignment = xlCenter
+                    mergeRange1.ClearContents
+                    Call HighlightKolomBU(cell.Row)
+                    
+                Else
+                    Set mergeRange1 = Me.Range("C" & cell.Row & ":F" & cell.Row)
+                    If mergeRange1.MergeCells Then mergeRange1.UnMerge
+                    
+                    If Not IsEmpty(cell.Value) Then
+                        Set lookupRange = Sheets("DATABASE").Range("B11:C100")
+                        hasil = Application.VLookup(cell.Value, lookupRange, 2, False)
+        
+                        Set mergeRange = Me.Range("C" & cell.Row & ":Q" & cell.Row)
+                        If mergeRange.MergeCells Then mergeRange.UnMerge
+        
+                        If Not IsError(hasil) Then
+                            mergeRange.Cells(1, 1).Value = hasil
+                            mergeRange.Merge
+                            mergeRange.HorizontalAlignment = xlLeft
+                            mergeRange.VerticalAlignment = xlCenter
+                            On Error Resume Next
+                            Me.Rows(cell.Row).AutoFit
+                            On Error GoTo Cleanup
+                        Else
+                            mergeRange.ClearContents
+                        End If
+        
+                        Call HighlightKolomBU(cell.Row)
+        
+                    Else
+                        Set mergeRange = Me.Range("C" & cell.Row & ":Q" & cell.Row)
+                        If mergeRange.MergeCells Then mergeRange.UnMerge
+                        mergeRange.ClearContents
+                        Me.Range("B" & cell.Row & ":U" & cell.Row).Interior.Color = RGB(255, 255, 255)
+                        
+                        Dim borderRange As Range
+                        Set borderRange = Me.Range("B" & cell.Row & ":U" & cell.Row)
+                        With borderRange.Borders
+                            .LineStyle = xlContinuous
+                            .Weight = xlThin
+                            .Color = RGB(0, 0, 0)
+                        End With
+                    End If
+                End If
+            Next cell
+        End If
+    End If
+    
+    ' ========================================
+    ' BLOK 1B: VLOOKUP OTOMATIS - KOLOM C
+    ' ========================================
+    Dim intersectC As Range
+    Set intersectC = Intersect(Target, Me.Range("C7:C10000"))
+    
+    If Not intersectC Is Nothing Then
+        If intersectC.Rows.Count <= 50 Then
+            For Each cell In intersectC.Cells
+                If Not IsEmpty(cell.Value) Then
+                    isIn = False
+                    For i = LBound(included_list) To UBound(included_list)
+                        If UCase(Trim(cell.Value)) = UCase(Trim(included_list(i))) Then
+                            isIn = True
+                            Exit For
+                        End If
+                    Next i
+                    
+                    If isIn Then
+                        Set mergeRange = Me.Range("C" & cell.Row & ":Q" & cell.Row)
+                        If mergeRange.MergeCells Then mergeRange.UnMerge
+                        
+                        Set mergeRange1 = Me.Range("C" & cell.Row & ":F" & cell.Row)
+                        If mergeRange1.MergeCells Then mergeRange1.UnMerge
+                        
+                        Dim mergeRangeDF As Range
+                        Set mergeRangeDF = Me.Range("D" & cell.Row & ":F" & cell.Row)
+                        If mergeRangeDF.MergeCells Then mergeRangeDF.UnMerge
+                        mergeRangeDF.Merge
+                        mergeRangeDF.HorizontalAlignment = xlLeft
+                        mergeRangeDF.VerticalAlignment = xlCenter
+                        
+                        On Error Resume Next
+                        Me.Rows(cell.Row).AutoFit
+                        On Error GoTo Cleanup
+                    Else
+                        isExcluded = False
+                        If Not IsEmpty(Me.Range("B" & cell.Row).Value) Then
+                            For i = LBound(included_list) To UBound(included_list)
+                                If UCase(Trim(Me.Range("B" & cell.Row).Value)) = UCase(Trim(included_list(i))) Then
+                                    isExcluded = True
+                                    Exit For
+                                End If
+                            Next i
+                        End If
+                        
+                        If isExcluded Then
+                            Set mergeRange1 = Me.Range("C" & cell.Row & ":F" & cell.Row)
+                            If mergeRange1.MergeCells Then mergeRange1.UnMerge
+                            
+                            Set mergeRange = Me.Range("C" & cell.Row & ":Q" & cell.Row)
+                            If mergeRange.MergeCells Then mergeRange.UnMerge
+                            
+                            Dim tempValue As Variant
+                            tempValue = cell.Value
+                            
+                            mergeRange.Merge
+                            mergeRange.Cells(1, 1).Value = tempValue
+                            mergeRange.HorizontalAlignment = xlLeft
+                            mergeRange.VerticalAlignment = xlCenter
+                            
+                            On Error Resume Next
+                            Me.Rows(cell.Row).AutoFit
+                            On Error GoTo Cleanup
+                        End If
+                    End If
+                Else
+                    Dim mergeRangeDF2 As Range
+                    Set mergeRangeDF2 = Me.Range("D" & cell.Row & ":F" & cell.Row)
+                    If mergeRangeDF2.MergeCells Then mergeRangeDF2.UnMerge
+                    
+                    Set mergeRange = Me.Range("C" & cell.Row & ":Q" & cell.Row)
+                    If mergeRange.MergeCells Then mergeRange.UnMerge
+                    Me.Range("C" & cell.Row & ":Q" & cell.Row).ClearContents
+                    
+                    Dim borderRangeC As Range
+                    Set borderRangeC = Me.Range("C" & cell.Row & ":U" & cell.Row)
+                    With borderRangeC.Borders
+                        .LineStyle = xlContinuous
+                        .Weight = xlThin
+                        .Color = RGB(0, 0, 0)
+                    End With
+                End If
+            Next cell
+        End If
+    End If
+
+    ' ========================================
+    ' BLOK 2: AUTO-INSERT KE DATABASE - KOLOM D
+    ' ========================================
+    Dim intersectD As Range
+    Set intersectD = Intersect(Target, Me.Range("D7:D10000"))
+    
+    If Not intersectD Is Nothing Then
+        If intersectD.Rows.Count <= 50 Then
+            Set wsDB = Sheets("DATABASE")
+            Set checkRange = wsDB.Range("I:I")
+            
+            For Each cell In intersectD.Cells
+                If Not IsEmpty(cell.Value) Then
+                    Dim cellValueStr As String
+                    
+                    If IsNumeric(cell.Value) And cell.Value >= 1 And cell.Value <= 20 Then
+                        cellValueStr = Format(cell.Value, "00")
+                    Else
+                        cellValueStr = CStr(cell.Value)
+                    End If
+                    
+                    If IsError(Application.Match(cellValueStr, excluded_list, 0)) Then
+                        If Application.CountIf(checkRange, cell.Value) = 0 Then
+                            lastRow = wsDB.Cells(wsDB.Rows.Count, "I").End(xlUp).Row + 1
+                            wsDB.Cells(lastRow, "I").Value = cell.Value
+                        End If
+        
+                        Set mergeRange = Me.Range("D" & cell.Row & ":Q" & cell.Row)
+                        If mergeRange.MergeCells Then mergeRange.UnMerge
+                        mergeRange.Merge
+                        mergeRange.HorizontalAlignment = xlLeft
+                        mergeRange.VerticalAlignment = xlCenter
+                        
+                        On Error Resume Next
+                        Me.Rows(cell.Row).AutoFit
+                        On Error GoTo Cleanup
+                    Else
+                        Set mergeRange = Me.Range("D" & cell.Row & ":Q" & cell.Row)
+                        If mergeRange.MergeCells Then mergeRange.UnMerge
+                        
+                        Dim borderRangeD As Range
+                        Set borderRangeD = Me.Range("D" & cell.Row & ":U" & cell.Row)
+                        With borderRangeD.Borders
+                            .LineStyle = xlContinuous
+                            .Weight = xlThin
+                            .Color = RGB(0, 0, 0)
+                        End With
+                    End If
+                Else
+                    Set mergeRange = Me.Range("D" & cell.Row & ":Q" & cell.Row)
+                    If mergeRange.MergeCells Then mergeRange.UnMerge
+                    mergeRange.ClearContents
+                    
+                    Dim borderRangeE As Range
+                    Set borderRangeE = Me.Range("D" & cell.Row & ":U" & cell.Row)
+                    With borderRangeE.Borders
+                        .LineStyle = xlContinuous
+                        .Weight = xlThin
+                        .Color = RGB(0, 0, 0)
+                    End With
+                End If
+            Next cell
+        
+            Call CleanupDATABASE
+            Call UpdateDynamicBorders
+        End If
+    End If
+    
+    ' Merge E:F saat D diisi
+    If Not intersectD Is Nothing Then
+        If intersectD.Rows.Count <= 50 Then
+            For Each cell In intersectD.Cells
+                If Not IsEmpty(cell.Value) Then
+                    If Not IsError(Application.Match(cell.Value, included_list, 0)) Then
+                        Dim mergeEF As Range
+                        Set mergeEF = Me.Range("E" & cell.Row & ":F" & cell.Row)
+                        
+                        If mergeEF.MergeCells Then mergeEF.UnMerge
+                        mergeEF.Merge
+                        mergeEF.HorizontalAlignment = xlCenter
+                        mergeEF.VerticalAlignment = xlCenter
+                        
+                        With mergeEF.Borders
+                            .LineStyle = xlContinuous
+                            .Weight = xlThin
+                            .Color = RGB(0, 0, 0)
+                        End With
+                        
+                        Set borderRangeD = Me.Range("D" & cell.Row)
+                        With borderRangeD.Borders
+                            .LineStyle = xlContinuous
+                            .Weight = xlThin
+                            .Color = RGB(0, 0, 0)
+                        End With
+                        
+                        Dim borderRangeGU As Range
+                        Set borderRangeGU = Me.Range("G" & cell.Row & ":U" & cell.Row)
+                        With borderRangeGU.Borders
+                            .LineStyle = xlContinuous
+                            .Weight = xlThin
+                            .Color = RGB(0, 0, 0)
+                        End With
+                    End If
+                Else
+                    Dim unmergeEF As Range
+                    Set unmergeEF = Me.Range("E" & cell.Row & ":F" & cell.Row)
+                    If unmergeEF.MergeCells Then unmergeEF.UnMerge
+                    
+                    Dim borderRangeAll As Range
+                    Set borderRangeAll = Me.Range("D" & cell.Row & ":U" & cell.Row)
+                    With borderRangeAll.Borders
+                        .LineStyle = xlContinuous
+                        .Weight = xlThin
+                        .Color = RGB(0, 0, 0)
+                    End With
+                End If
+            Next cell
+        End If
+    End If
+
+    ' ========================================
+    ' BLOK 3: AUTO-INSERT KE DATABASE - KOLOM E
+    ' ========================================
+    Dim intersectE As Range
+    Set intersectE = Intersect(Target, Me.Range("E7:E10000"))
+    
+    If Not intersectE Is Nothing Then
+        If intersectE.Rows.Count <= 50 Then
+            Set wsDB = Sheets("DATABASE")
+            Set checkRange = wsDB.Range("I:I")
+            
+            For Each cell In intersectE.Cells
+                If Not IsEmpty(cell.Value) Then
+                    If IsError(Application.Match(cell.Value, excluded_list, 0)) Then
+                        If Application.CountIf(checkRange, cell.Value) = 0 Then
+                            lastRow = wsDB.Cells(wsDB.Rows.Count, "I").End(xlUp).Row + 1
+                            wsDB.Cells(lastRow, "I").Value = cell.Value
+                        End If
+                    End If
+                    
+                    If IsError(Application.Match(cell.Value, included_list, 0)) Then
+                        Set mergeRange = Me.Range("E" & cell.Row & ":Q" & cell.Row)
+                        If mergeRange.MergeCells Then mergeRange.UnMerge
+                        mergeRange.Merge
+                        mergeRange.HorizontalAlignment = xlLeft
+                        mergeRange.VerticalAlignment = xlCenter
+                    Else
+                        Set mergeRange = Me.Range("E" & cell.Row & ":Q" & cell.Row)
+                        If mergeRange.MergeCells Then mergeRange.UnMerge
+                        
+                        Set borderRange = Me.Range("D" & cell.Row & ":U" & cell.Row)
+                        With borderRange.Borders
+                            .LineStyle = xlContinuous
+                            .Weight = xlThin
+                            .Color = RGB(0, 0, 0)
+                        End With
+                    End If
+                    
+                    On Error Resume Next
+                    Me.Rows(cell.Row).AutoFit
+                    On Error GoTo Cleanup
+                    
+                Else
+                    Set mergeRange = Me.Range("E" & cell.Row & ":Q" & cell.Row)
+                    If mergeRange.MergeCells Then mergeRange.UnMerge
+                    mergeRange.ClearContents
+                    
+                    Set borderRange = Me.Range("D" & cell.Row & ":U" & cell.Row)
+                    With borderRange.Borders
+                        .LineStyle = xlContinuous
+                        .Weight = xlThin
+                        .Color = RGB(0, 0, 0)
+                    End With
+                End If
+            Next cell
+            
+            Call CleanupDATABASE
+            Call UpdateDynamicBorders
+        End If
+    End If
+    
+    ' ========================================
+    ' BLOK 4: AUTO-INSERT KE DATABASE - KOLOM F
+    ' ========================================
+    Dim intersectF As Range
+    Set intersectF = Intersect(Target, Me.Range("F7:F10000"))
+    
+    If Not intersectF Is Nothing Then
+        If intersectF.Rows.Count <= 50 Then
+            Set wsDB = Sheets("DATABASE")
+            Set checkRange = wsDB.Range("L:L")
+            
+            For Each cell In intersectF.Cells
+                If Not IsEmpty(cell.Value) Then
+                    If Application.CountIf(checkRange, cell.Value) = 0 Then
+                        lastRow = wsDB.Cells(wsDB.Rows.Count, "L").End(xlUp).Row + 1
+                        wsDB.Cells(lastRow, "L").Value = cell.Value
+                    End If
+                    
+                    cell.WrapText = False
+                    Me.Columns("F").AutoFit
+                
+                Else
+                    Me.Columns("F").ColumnWidth = 15
+                End If
+            Next cell
+            
+            Call CleanupDATABASE
+            Call UpdateDynamicBorders
+        End If
+    End If
+
+    ' ========================================
+    ' BLOK 5: DROPDOWN & FORMULA - KOLOM G
+    ' ========================================
+    Dim intersectG As Range
+    Set intersectG = Intersect(Target, Me.Range("G7:G10000"))
+    
+    If Not intersectG Is Nothing Then
+        If intersectG.Rows.Count <= 50 Then
+            Set wsDB = Sheets("DATABASE")
+            
+            For Each cell In intersectG.Cells
+                rowNum = cell.Row
+                
+                If Not IsEmpty(cell.Value) Then
+                    Call CreateDropdownRow(Me, wsDB, rowNum)
+                    
+                    On Error Resume Next
+                    Me.Cells(rowNum, "R").FormulaLocal = _
+                        "=IF(G" & rowNum & "="""";"""";G" & rowNum & "*IF(J" & rowNum & "="""";1;J" & rowNum & ")*IF(M" & rowNum & "="""";1;M" & rowNum & ")*IF(P" & rowNum & "="""";1;P" & rowNum & "))"
+                    
+                    Me.Cells(rowNum, "U").FormulaLocal = _
+                        "=IFERROR(R" & rowNum & "*T" & rowNum & ";"""")"
+                    On Error GoTo Cleanup
+                Else
+                    Call DeleteDropdownRow(Me, rowNum)
+                    
+                    On Error Resume Next
+                    Me.Cells(rowNum, "R").ClearContents
+                    Me.Cells(rowNum, "U").ClearContents
+                    On Error GoTo Cleanup
+                End If
+            Next cell
+        End If
+    End If
+
+    ' ========================================
+    ' BLOK BARU: DROPDOWN DINAMIS B-C-D-E-F
+    ' ========================================
+    Dim intersectBCDEF As Range
+    Set intersectBCDEF = Intersect(Target, Me.Range("B7:F10000"))
+    
+    If Not intersectBCDEF Is Nothing Then
+        If intersectBCDEF.Rows.Count <= 50 Then
+            Set wsDB = Sheets("DATABASE")
+            
+            For Each cell In intersectBCDEF.Cells
+                rowNum = cell.Row
+                Call CreateDropdownCDE(Me, wsDB, rowNum)
+                
+                If IsEmpty(cell.Value) Then
+                    Select Case cell.Column
+                        Case 2: Call DeleteDropdownCDE(Me, rowNum, "B")
+                        Case 3: Call DeleteDropdownCDE(Me, rowNum, "C")
+                        Case 4: Call DeleteDropdownCDE(Me, rowNum, "D")
+                        Case 5: Call DeleteDropdownCDE(Me, rowNum, "E")
+                    End Select
+                End If
+            Next cell
+        End If
+    End If
+
+Cleanup:
+    Application.StatusBar = False
+    Application.ScreenUpdating = True
+    Application.EnableEvents = True
+    Application.Calculation = xlCalculationAutomatic
+End Sub
+
+' ========================================
+' FUNGSI: ENSURE BORDERS UNTUK ROW
+' ========================================
+Private Sub EnsureRowBorders(Target As Range)
+    On Error Resume Next
+    
+    Dim cell As Range
+    Dim rowBorderRange As Range
+    Dim uniqueRows As Collection
+    Dim rowNum As Variant
+    
+    ' Dapatkan unique rows dari Target
+    Set uniqueRows = New Collection
+    For Each cell In Target.Cells
+        On Error Resume Next
+        uniqueRows.Add cell.Row, CStr(cell.Row)
+        On Error GoTo 0
+    Next cell
+    
+    ' Apply border untuk setiap row yang unik
+    For Each rowNum In uniqueRows
+        ' Hanya untuk row dalam range 7-10000
+        If CLng(rowNum) >= 7 And CLng(rowNum) <= 10000 Then
+            Set rowBorderRange = Me.Range("B" & rowNum & ":U" & rowNum)
+            
+            ' Check apakah ada cell di row ini yang tidak punya border
+            Dim needsBorder As Boolean
+            needsBorder = False
+            
+            On Error Resume Next
+            If rowBorderRange.Borders(xlEdgeLeft).LineStyle = xlNone Or _
+               rowBorderRange.Borders(xlEdgeRight).LineStyle = xlNone Or _
+               rowBorderRange.Borders(xlEdgeTop).LineStyle = xlNone Or _
+               rowBorderRange.Borders(xlEdgeBottom).LineStyle = xlNone Or _
+               rowBorderRange.Borders(xlInsideVertical).LineStyle = xlNone Or _
+               rowBorderRange.Borders(xlInsideHorizontal).LineStyle = xlNone Then
+                needsBorder = True
+            End If
+            On Error GoTo 0
+            
+            ' Apply border jika diperlukan
+            If needsBorder Then
+                With rowBorderRange.Borders
+                    .LineStyle = xlContinuous
+                    .Weight = xlThin
+                    .Color = RGB(0, 0, 0)
+                End With
+            End If
+        End If
+    Next rowNum
+    
+    On Error GoTo 0
+End Sub
+
+' ========================================
+' FUNGSI: CLEANUP DATABASE
+' ========================================
+Private Sub CleanupDATABASE()
+    Dim wsDB As Worksheet
+    Dim wsSheet1 As Worksheet
+    Dim lastRowDB As Long
+    Dim lastRowL As Long
+    Dim i As Long
+    Dim nilaiDB As String
+    Dim ditemukan As Boolean
+    Dim excluded_list As Variant
+    Dim master_list_g As Range
+    Dim master_list_l As Range
+    Dim protectedStartRow_I As Long
+    Dim protectedEndRow_I As Long
+    Dim protectedStartRow_L As Long
+    Dim protectedEndRow_L As Long
+    
+    On Error Resume Next
+    
+    ' Daftar nilai yang dikecualikan dari cleanup
+    excluded_list = Array("01", "02", "03", "04", "05", "06", "07", "08", "09", "10", _
+                          "11", "12", "13", "14", "15", "16", "17", "18", "19", "20")
+    
+    Set wsDB = Sheets("DATABASE")
+    Set wsSheet1 = Sheets("TEMPLATE")
+    
+    ' ========================================
+    ' TENTUKAN RANGE DATA YANG DILINDUNGI
+    ' ========================================
+    ' Data di baris 11-19 di kolom I akan TETAP ADA (tidak bisa dihapus)
+    protectedStartRow_I = 11
+    protectedEndRow_I = 200
+    
+    ' Data di baris 11-110 di kolom L akan TETAP ADA (tidak bisa dihapus)
+    protectedStartRow_L = 11
+    protectedEndRow_L = 200
+    
+    ' ========================================
+    ' CLEANUP KOLOM I (DATABASE)
+    ' ========================================
+    lastRowDB = wsDB.Cells(wsDB.Rows.Count, "I").End(xlUp).Row
+    
+    For i = lastRowDB To protectedEndRow_I + 1 Step -1  ' Mulai dari bawah, stop di baris terproteksi
+        nilaiDB = wsDB.Cells(i, "I").Value
+        
+        ' Cek apakah nilai BUKAN excluded_list
+        If nilaiDB <> "" And _
+           IsError(Application.Match(nilaiDB, excluded_list, 0)) Then
+            
+            ditemukan = False
+            
+            ' Cek apakah masih digunakan di TEMPLATE kolom D
+            If Application.CountIf(wsSheet1.Range("D:D"), nilaiDB) > 0 Then
+                ditemukan = True
+            End If
+            
+            ' Cek apakah masih digunakan di TEMPLATE kolom E
+            If Not ditemukan Then
+                If Application.CountIf(wsSheet1.Range("E:E"), nilaiDB) > 0 Then
+                    ditemukan = True
+                End If
+            End If
+            
+            ' HAPUS dari DATABASE jika tidak ditemukan
+            If Not ditemukan Then
+                wsDB.Cells(i, "I").Delete Shift:=xlUp
+            End If
+        End If
+    Next i
+    
+    ' ========================================
+    ' CLEANUP KOLOM L (DATABASE)
+    ' ========================================
+    lastRowL = wsDB.Cells(wsDB.Rows.Count, "L").End(xlUp).Row
+    
+    For i = lastRowL To protectedEndRow_L + 1 Step -1  ' Mulai dari bawah, stop di baris terproteksi
+        nilaiDB = wsDB.Cells(i, "L").Value
+        
+        ' Cek apakah nilai BUKAN excluded_list
+        If nilaiDB <> "" And _
+           IsError(Application.Match(nilaiDB, excluded_list, 0)) Then
+            
+            ditemukan = False
+            
+            ' Cek apakah masih digunakan di TEMPLATE kolom F
+            If Application.CountIf(wsSheet1.Range("F:F"), nilaiDB) > 0 Then
+                ditemukan = True
+            End If
+            
+            ' HAPUS dari DATABASE jika tidak ditemukan
+            If Not ditemukan Then
+                wsDB.Cells(i, "L").Delete Shift:=xlUp
+            End If
+        End If
+    Next i
+End Sub
+
+' ========================================
+' FUNGSI: CREATE DROPDOWN KOLOM C, D, E, F (BARU)
+' ========================================
+Sub CreateDropdownCDE(ws As Worksheet, wsDB As Worksheet, rowNum As Long)
+    Dim lastRowF As Long
+    Dim lastRowI As Long
+    Dim lastRowL As Long
+    Dim included_list As Variant
+    Dim valC As String
+    Dim valD As String
+    Dim valE As String
+    
+    On Error Resume Next
+    
+    ' Generate included_list
+    included_list = GenerateIncludedList()
+    
+    ' ========================================
+    ' HAPUS DROPDOWN DULU (RESET) - PENTING!
+    ' ========================================
+    ' Ini memastikan dropdown hanya ada jika memenuhi syarat
+    ws.Cells(rowNum, "C").Validation.Delete
+    ws.Cells(rowNum, "D").Validation.Delete
+    ws.Cells(rowNum, "E").Validation.Delete
+    ws.Cells(rowNum, "F").Validation.Delete
+    
+    ' ========================================
+    ' DROPDOWN KOLOM C (muncul saat B diisi)
+    ' ========================================
+    If Not IsEmpty(ws.Cells(rowNum, "B").Value) Then
+        lastRowF = wsDB.Cells(wsDB.Rows.Count, "F").End(xlUp).Row
+        If lastRowF < 11 Then lastRowF = 11
+        
+        With ws.Cells(rowNum, "C").Validation
+            .Add Type:=xlValidateList, _
+                 AlertStyle:=xlValidAlertStop, _
+                 Operator:=xlBetween, _
+                 Formula1:="=DATABASE!$F$11:$F$" & lastRowF
+            .IgnoreBlank = True
+            .InCellDropdown = True
+            .ShowError = False
+        End With
+        
+        ' Set alignment CENTER jika C berisi included_list
+        Dim valCCheck As String
+        valCCheck = Trim(ws.Cells(rowNum, "C").Value)
+        If Not IsEmpty(valCCheck) Then
+            Dim isCIncluded As Boolean
+            isCIncluded = False
+            Dim m As Long
+            For m = LBound(included_list) To UBound(included_list)
+                If UCase(valCCheck) = UCase(Trim(included_list(m))) Then
+                    isCIncluded = True
+                    Exit For
+                End If
+            Next m
+            
+            If isCIncluded Then
+                ws.Cells(rowNum, "C").HorizontalAlignment = xlCenter
+                ws.Cells(rowNum, "C").VerticalAlignment = xlCenter
+            End If
+        End If
+    End If
+    
+    ' ========================================
+    ' DROPDOWN KOLOM D (muncul saat C diisi DAN C termasuk included_list)
+    ' ========================================
+    valC = Trim(ws.Cells(rowNum, "C").Value)
+    
+    If Not IsEmpty(valC) Then
+        ' Cek apakah C termasuk included_list
+        Dim isInIncludedListC As Boolean
+        isInIncludedListC = False
+        
+        Dim j As Long
+        For j = LBound(included_list) To UBound(included_list)
+            If UCase(valC) = UCase(Trim(included_list(j))) Then
+                isInIncludedListC = True
+                Exit For
+            End If
+        Next j
+        
+        ' Hanya buat dropdown D jika C termasuk included_list
+        If isInIncludedListC Then
+            ' Set C ke CENTER karena termasuk included_list
+            ws.Cells(rowNum, "C").HorizontalAlignment = xlCenter
+            ws.Cells(rowNum, "C").VerticalAlignment = xlCenter
+            
+            lastRowI = wsDB.Cells(wsDB.Rows.Count, "I").End(xlUp).Row
+            If lastRowI < 11 Then lastRowI = 11
+            
+            With ws.Cells(rowNum, "D").Validation
+                .Add Type:=xlValidateList, _
+                     AlertStyle:=xlValidAlertStop, _
+                     Operator:=xlBetween, _
+                     Formula1:="=DATABASE!$I$11:$I$" & lastRowI
+                .IgnoreBlank = True
+                .InCellDropdown = True
+                .ShowError = False
+            End With
+            
+            ' Set D ke CENTER jika berisi included_list
+            Dim valDCheck As String
+            valDCheck = Trim(ws.Cells(rowNum, "D").Value)
+            If Not IsEmpty(valDCheck) Then
+                Dim isDIncluded As Boolean
+                isDIncluded = False
+                Dim n As Long
+                For n = LBound(included_list) To UBound(included_list)
+                    If UCase(valDCheck) = UCase(Trim(included_list(n))) Then
+                        isDIncluded = True
+                        Exit For
+                    End If
+                Next n
+                
+                If isDIncluded Then
+                    ws.Cells(rowNum, "D").HorizontalAlignment = xlCenter
+                    ws.Cells(rowNum, "D").VerticalAlignment = xlCenter
+                End If
+            End If
+        End If
+    End If
+    
+    ' ========================================
+    ' DROPDOWN KOLOM E (muncul saat D diisi DAN D termasuk included_list)
+    ' ========================================
+    valD = Trim(ws.Cells(rowNum, "D").Value)
+    
+    If Not IsEmpty(valD) Then
+        ' Cek apakah D termasuk included_list
+        Dim isInIncludedListD As Boolean
+        isInIncludedListD = False
+        
+        Dim i As Long
+        For i = LBound(included_list) To UBound(included_list)
+            If UCase(valD) = UCase(Trim(included_list(i))) Then
+                isInIncludedListD = True
+                Exit For
+            End If
+        Next i
+        
+        ' Hanya buat dropdown E jika D termasuk included_list
+        If isInIncludedListD Then
+            ' Set D ke CENTER karena termasuk included_list
+            ws.Cells(rowNum, "D").HorizontalAlignment = xlCenter
+            ws.Cells(rowNum, "D").VerticalAlignment = xlCenter
+            
+            lastRowI = wsDB.Cells(wsDB.Rows.Count, "I").End(xlUp).Row
+            If lastRowI < 11 Then lastRowI = 11
+            
+            With ws.Cells(rowNum, "E").Validation
+                .Add Type:=xlValidateList, _
+                     AlertStyle:=xlValidAlertStop, _
+                     Operator:=xlBetween, _
+                     Formula1:="=DATABASE!$I$11:$I$" & lastRowI
+                .IgnoreBlank = True
+                .InCellDropdown = True
+                .ShowError = False
+            End With
+            
+            ' Set E ke CENTER jika berisi included_list
+            Dim valECheck As String
+            valECheck = Trim(ws.Cells(rowNum, "E").Value)
+            If Not IsEmpty(valECheck) Then
+                Dim isEIncluded As Boolean
+                isEIncluded = False
+                Dim p As Long
+                For p = LBound(included_list) To UBound(included_list)
+                    If UCase(valECheck) = UCase(Trim(included_list(p))) Then
+                        isEIncluded = True
+                        Exit For
+                    End If
+                Next p
+                
+                If isEIncluded Then
+                    ws.Cells(rowNum, "E").HorizontalAlignment = xlCenter
+                    ws.Cells(rowNum, "E").VerticalAlignment = xlCenter
+                End If
+            End If
+        End If
+    End If
+    
+    ' ========================================
+    ' DROPDOWN KOLOM F (muncul saat E diisi DAN E termasuk included_list)
+    ' ========================================
+    valE = Trim(ws.Cells(rowNum, "E").Value)
+    
+    If Not IsEmpty(valE) Then
+        ' Cek apakah E termasuk included_list
+        Dim isInIncludedListE As Boolean
+        isInIncludedListE = False
+        
+        Dim k As Long
+        For k = LBound(included_list) To UBound(included_list)
+            If UCase(valE) = UCase(Trim(included_list(k))) Then
+                isInIncludedListE = True
+                Exit For
+            End If
+        Next k
+        
+        ' Hanya buat dropdown F jika E termasuk included_list
+        If isInIncludedListE Then
+            ' Set E ke CENTER karena termasuk included_list
+            ws.Cells(rowNum, "E").HorizontalAlignment = xlCenter
+            ws.Cells(rowNum, "E").VerticalAlignment = xlCenter
+            
+            lastRowL = wsDB.Cells(wsDB.Rows.Count, "L").End(xlUp).Row
+            If lastRowL < 11 Then lastRowL = 11
+            
+            With ws.Cells(rowNum, "F").Validation
+                .Add Type:=xlValidateList, _
+                     AlertStyle:=xlValidAlertStop, _
+                     Operator:=xlBetween, _
+                     Formula1:="=DATABASE!$L$11:$L$" & lastRowL
+                .IgnoreBlank = True
+                .InCellDropdown = True
+                .ShowError = False
+            End With
+        End If
+    End If
+    
+    On Error GoTo 0
+End Sub
+
+' ========================================
+' FUNGSI: DELETE DROPDOWN KOLOM C, D, E, F (BARU)
+' ========================================
+Sub DeleteDropdownCDE(ws As Worksheet, rowNum As Long, kolom As String)
+    On Error Resume Next
+    
+    Select Case UCase(kolom)
+        Case "B"
+            ' Jika B dihapus, hapus dropdown C, D, E, F
+            ws.Cells(rowNum, "C").Validation.Delete
+            ws.Cells(rowNum, "D").Validation.Delete
+            ws.Cells(rowNum, "E").Validation.Delete
+            ws.Cells(rowNum, "F").Validation.Delete
+            
+        Case "C"
+            ' Jika C dihapus, hapus dropdown D, E, F
+            ws.Cells(rowNum, "D").Validation.Delete
+            ws.Cells(rowNum, "E").Validation.Delete
+            ws.Cells(rowNum, "F").Validation.Delete
+            
+        Case "D"
+            ' Jika D dihapus, hapus dropdown E, F
+            ws.Cells(rowNum, "E").Validation.Delete
+            ws.Cells(rowNum, "F").Validation.Delete
+            
+        Case "E"
+            ' Jika E dihapus, hapus dropdown F
+            ws.Cells(rowNum, "F").Validation.Delete
+    End Select
+    
+    On Error GoTo 0
+End Sub
+
+' ========================================
+' FUNGSI: UPDATE DYNAMIC BORDERS
+' ========================================
+Sub UpdateDynamicBorders()
+    Dim ws As Worksheet
+    Dim lastRowI As Long, lastRowL As Long, lastRow As Long
+    Dim lastCol As Long
+    Dim rng As Range
+    Dim cell As Range
+    
+    Set ws = ThisWorkbook.Sheets("DATABASE")
+    
+    ' Cari baris terakhir berdasarkan kolom I dan L
+    lastRowI = ws.Cells(ws.Rows.Count, "I").End(xlUp).Row
+    lastRowL = ws.Cells(ws.Rows.Count, "L").End(xlUp).Row
+    lastRow = Application.Max(lastRowI, lastRowL)
+    
+    ' Jika tidak ada data, hentikan
+    If lastRow < 2 Then Exit Sub
+    
+    ' Cari kolom terakhir dinamis
+    lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+    
+    ' Loop cek setiap baris untuk kolom terpanjang
+    Dim i As Long, tempCol As Long
+    For i = 1 To lastRow
+        tempCol = ws.Cells(i, ws.Columns.Count).End(xlToLeft).Column
+        If tempCol > lastCol Then lastCol = tempCol
+    Next i
+    
+    ' Tentukan range data aktif
+    Set rng = ws.Range(ws.Cells(1, 1), ws.Cells(lastRow, lastCol))
+    
+    ' Hapus semua border dulu
+    rng.Borders.LineStyle = xlNone
+    
+    ' Loop setiap cell dan tambahkan border hanya untuk yang ada isinya
+    For Each cell In rng
+        If Not IsEmpty(cell.Value) Then
+            With cell.Borders
+                .LineStyle = xlContinuous
+                .Weight = xlThin
+                .ColorIndex = xlAutomatic
+            End With
+        End If
+    Next cell
+    
+    With rng.Font
+        .Name = "Calibri"
+        .Size = 11
+        .Bold = False
+        .Italic = False
+        .Color = RGB(0, 0, 0)
+    End With
+    
+    ' Auto-fit baris & kolom biar rapi
+    ws.Columns.AutoFit
+    ws.Rows.AutoFit
+End Sub
+
+' ========================================
+' FUNGSI: HIGHLIGHT KOLOM B-U
+' ========================================
+Sub HighlightKolomBU(targetRow As Long)
+    Dim ws As Worksheet
+    Dim val As String
+    Dim warna As Long
+    Dim rng As Range
+
+    Set ws = ThisWorkbook.Sheets("TEMPLATE")
+    val = Trim(ws.Cells(targetRow, "B").Text)
+    Set rng = ws.Range("B" & targetRow & ":U" & targetRow)
+    
+    ' Default tanpa warna
+    warna = RGB(255, 255, 255)
+    
+    Select Case True
+        Case val Like "05[1-9]"        ' 051 – 059
+            warna = RGB(169, 208, 142) ' #A9D08E (Hijau)
+        
+        Case val Like "######"          ' 6 karakter angka
+            warna = RGB(183, 222, 232)  ' #B7DEE8 (Biru muda)
+        
+        Case val = "002" Or val = "959" Or val = "994"
+            warna = RGB(255, 192, 0)    ' #FFC000 (Kuning)
+        
+        Case val = "5786"
+            warna = RGB(0, 153, 255)    ' #0099FF (Biru terang)
+        
+        Case val = "01" Or val = "EBA" Or val = "WA"
+            warna = RGB(255, 255, 255)  ' #FFFFFF (Putih)
+            
+        Case val Like "[A-Z]" Or val Like "[a-z]"
+            warna = RGB(230, 184, 183)
+        
+        Case Else
+            warna = RGB(255, 255, 255)  ' Default putih
+    End Select
+
+    ' Terapkan warna
+    rng.Interior.Color = warna
+End Sub
+
+' ========================================
+' FUNGSI: CREATE DROPDOWN ROW (UNTUK KOLOM H, K, N, Q, S)
+' Dropdown muncul hanya ketika kolom G terisi
+' ========================================
+Sub CreateDropdownRow(ws As Worksheet, wsDB As Worksheet, rowNum As Long)
+    Dim lastRowO As Long
+    Dim targetCols As Variant
+    Dim i As Integer
+    Dim valG As String
+    
+    On Error Resume Next
+    
+    ' Ambil nilai kolom G
+    valG = Trim(ws.Cells(rowNum, "G").Value)
+    
+    ' Hapus semua dropdown dulu (RESET)
+    targetCols = Array(8, 11, 14, 17, 19)  ' H=8, K=11, N=14, Q=17, S=19
+    
+    For i = LBound(targetCols) To UBound(targetCols)
+        ws.Cells(rowNum, targetCols(i)).Validation.Delete
+    Next i
+    
+    ' ========================================
+    ' DROPDOWN H, K, N, Q, S (muncul saat G diisi)
+    ' ========================================
+    If Not IsEmpty(valG) Then
+        lastRowO = wsDB.Cells(wsDB.Rows.Count, "O").End(xlUp).Row
+        If lastRowO < 11 Then lastRowO = 11
+        
+        ' Buat dropdown untuk semua kolom target
+        For i = LBound(targetCols) To UBound(targetCols)
+            With ws.Cells(rowNum, targetCols(i)).Validation
+                .Add Type:=xlValidateList, _
+                     AlertStyle:=xlValidAlertStop, _
+                     Operator:=xlBetween, _
+                     Formula1:="=DATABASE!$O$11:$O$" & lastRowO
+                .IgnoreBlank = True
+                .InCellDropdown = True
+                .ShowError = False
+            End With
+        Next i
+    End If
+    
+    On Error GoTo 0
+End Sub
+
+' ========================================
+' FUNGSI: DELETE DROPDOWN ROW (UNTUK KOLOM H, K, N, Q, S)
+' Dipanggil ketika kolom G dihapus
+' ========================================
+Sub DeleteDropdownRow(ws As Worksheet, rowNum As Long)
+    Dim targetCols As Variant
+    Dim i As Integer
+    
+    On Error Resume Next
+    
+    targetCols = Array(8, 11, 14, 17, 19)  ' H=8, K=11, N=14, Q=17, S=19
+    
+    For i = LBound(targetCols) To UBound(targetCols)
+        ws.Cells(rowNum, targetCols(i)).Validation.Delete
+    Next i
+    
+    On Error GoTo 0
+End Sub
